@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#f3ead8">
+  <meta name="description" content="In Evidence is a sequential logic puzzle set inside delightfully unusual civil lawsuits.">
+  <title>In Evidence | A logic puzzle</title>
+  <link rel="preload" href="assets/character-sheet.png" as="image">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#board">Skip to puzzle board</a>
+  <div class="paper-noise" aria-hidden="true"></div>
+  <header class="topbar">
+    <button class="wordmark" id="homeButton" aria-label="Open puzzle archive">
+      <span class="wordmark-small">A CASEBOARD LOGIC GAME</span>
+      <span>IN EVIDENCE</span>
+    </button>
+    <nav aria-label="Game tools">
+      <button class="nav-button" id="timerToggle" aria-pressed="false"><span aria-hidden="true">◷</span><span id="timerLabel">Timer off</span></button>
+      <button class="nav-button" id="archiveButton"><span aria-hidden="true">▦</span>Cases</button>
+      <button class="nav-button icon-only" id="helpButton" aria-label="How to play">?</button>
+    </nav>
+  </header>
+
+  <main class="game-shell">
+    <section class="case-heading" aria-labelledby="puzzleTitle">
+      <div>
+        <p class="case-kicker" id="caseMeta"></p>
+        <h1 id="puzzleTitle"></h1>
+        <p class="case-summary" id="caseSummary"></p>
+      </div>
+      <div class="case-stamp" aria-hidden="true"><span>CIVIL</span><strong>CASE FILE</strong></div>
+    </section>
+
+    <section class="desk-layout">
+      <aside class="clue-docket" aria-labelledby="clueHeading">
+        <div class="docket-tab">THE DOCKET</div>
+        <div class="docket-heading">
+          <div>
+            <h2 id="clueHeading">Clues on record</h2>
+            <p id="progressText">0 of 16 rulings established</p>
+          </div>
+          <span class="paperclip" aria-hidden="true"></span>
+        </div>
+        <div id="ruleCard"></div>
+        <div class="clue-list" id="clueList"></div>
+        <p class="spatial-note"><strong>Board language:</strong> Beside means immediately left or right. Above and below share a column. Neighbor includes horizontal, vertical, and diagonal spaces. Corners are A1, D1, A4, and D4.</p>
+      </aside>
+
+      <section class="board-wrap" aria-labelledby="boardHeading">
+        <h2 class="sr-only" id="boardHeading">Character evidence board</h2>
+        <div class="column-labels" aria-hidden="true"><span>A</span><span>B</span><span>C</span><span>D</span></div>
+        <div class="board-with-rows">
+          <div class="row-labels" aria-hidden="true"><span>1</span><span>2</span><span>3</span><span>4</span></div>
+          <div class="board" id="board"></div>
+        </div>
+        <div class="action-bar">
+          <button class="utility-button" id="undoButton" disabled><span aria-hidden="true">↶</span>Undo</button>
+          <button class="utility-button hint-button" id="hintButton"><span aria-hidden="true">✦</span>Hint</button>
+          <button class="utility-button" id="resetButton"><span aria-hidden="true">↺</span>Reset</button>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <dialog class="sheet-dialog evidence-dialog" id="evidenceDialog">
+    <button class="dialog-close" data-close="evidenceDialog" aria-label="Close evidence card">×</button>
+    <div id="evidenceDetail"></div>
+  </dialog>
+
+  <dialog class="sheet-dialog info-dialog" id="helpDialog">
+    <button class="dialog-close" data-close="helpDialog" aria-label="Close how to play">×</button>
+    <div class="dialog-copy">
+      <p class="dialog-label">HOW TO PLAY</p>
+      <h2>Follow what the record proves.</h2>
+      <p>Each person is connected to one item of evidence. Use the clues currently on the docket to establish whether an item was <strong>admitted</strong> or <strong>excluded</strong>.</p>
+      <ol>
+        <li>Find a ruling that follows with certainty from the visible clues.</li>
+        <li>Choose Admitted or Excluded on that person's card.</li>
+        <li>A correct deduction reveals a new clue and opens the next part of the case.</li>
+      </ol>
+      <div class="example-note"><strong>No guessing required.</strong> If the record cannot support your choice yet, it stays unmarked. Contradictions are explained without a penalty.</div>
+      <p class="legal-note">In Evidence uses simplified fictional rules for its puzzles. Real evidentiary decisions depend on the jurisdiction, facts, objections, and applicable law.</p>
+    </div>
+  </dialog>
+
+  <dialog class="sheet-dialog archive-dialog" id="archiveDialog">
+    <button class="dialog-close" data-close="archiveDialog" aria-label="Close case archive">×</button>
+    <div class="dialog-copy">
+      <p class="dialog-label">CASE ARCHIVE</p>
+      <h2>Choose a file.</h2>
+      <div class="archive-list" id="archiveList"></div>
+    </div>
+  </dialog>
+
+  <dialog class="sheet-dialog completion-dialog" id="completionDialog">
+    <div class="completion-burst" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+    <div id="completionContent"></div>
+  </dialog>
+
+  <script type="module" src="src/app.js"></script>
+</body>
+</html>
