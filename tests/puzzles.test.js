@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { PUZZLES } from "../src/puzzles.js";
 import { classifyAttempt, deductionFor, verifyPuzzle } from "../src/logic.js";
+import { migrateProgress } from "../src/progress.js";
+import { hintMessage, reviewActionLabel, rulingReviewModel } from "../src/review.js";
 
 const LEGACY_SOLUTIONS = {
   "blue-tile": "1011001010010110", "garden-goose": "0110100111001001",
@@ -30,16 +32,19 @@ test("launch collection contains ten complete handcrafted cases", () => {
     assert.equal(new Set(puzzle.characters.map((c) => c.evidence)).size, 16, `${puzzle.title} has duplicate evidence labels`);
     assert.equal(puzzle.solution.join(""), LEGACY_SOLUTIONS[puzzle.slug], `${puzzle.title} changed its saved-progress solution`);
     for (const person of puzzle.characters) {
+      assert.ok(person.caseRole);
       assert.ok(person.evidence);
       assert.ok(person.offeredToProve);
       assert.ok(person.evidenceIssue);
       assert.ok(person.foundation);
       assert.ok(person.rulingExplanation);
       assert.ok(person.paralegalTask);
-      assert.ok(person.ruleReference);
-      const url = new URL(person.ruleUrl);
-      assert.equal(url.protocol, "https:");
-      assert.equal(url.hostname, "www.pacodeandbulletin.gov");
+      assert.ok(person.rules.length >= 1);
+      for (const rule of person.rules) {
+        const url = new URL(rule.url);
+        assert.equal(url.protocol, "https:");
+        assert.equal(url.hostname, "www.pacodeandbulletin.gov");
+      }
     }
     for (const rule of puzzle.ruleCard.rules) {
       const url = new URL(rule.url);
@@ -48,16 +53,61 @@ test("launch collection contains ten complete handcrafted cases", () => {
   }
 });
 
-test("challenging openings require the filed count and the newly revealed relation together", () => {
-  for (const puzzle of PUZZLES.filter((item) => item.difficulty === "Challenging")) {
-    const owner = puzzle.path[0];
-    const target = puzzle.path[1];
-    const established = { [owner]: puzzle.solution[owner] };
-    assert.ok(deductionFor(puzzle, established, [owner], target), `${puzzle.title} should expose a combined deduction`);
-    const withoutCount = { ...puzzle, initialClues: puzzle.initialClues.filter((clue) => clue.type !== "rowCount") };
-    assert.equal(deductionFor(withoutCount, established, [owner], target), null, `${puzzle.title} should need the count clue`);
-    const withoutRelation = { ...puzzle, cardClues: puzzle.cardClues.filter((clue) => !clue.requiresTwoClues) };
-    assert.equal(deductionFor(withoutRelation, established, [owner], target), null, `${puzzle.title} should need the relation clue`);
+test("difficulty levels have distinct combined-deduction profiles", () => {
+  for (const puzzle of PUZZLES) {
+    const combined = puzzle.cardClues.filter((clue) => clue.combined).length;
+    if (puzzle.difficulty === "Introductory") assert.ok(combined <= 1, `${puzzle.title} has too many combined deductions`);
+    if (puzzle.difficulty === "Standard") assert.ok(combined >= 3, `${puzzle.title} needs at least three combined deductions`);
+    if (puzzle.difficulty === "Challenging") {
+      assert.ok(combined >= 4, `${puzzle.title} needs at least four combined deductions`);
+      assert.ok(puzzle.cardClues.some((clue) => clue.type === "neighborCount"));
+      assert.ok(puzzle.cardClues.some((clue) => clue.type === "relation"));
+      assert.ok(puzzle.cardClues.some((clue) => clue.type === "rowCount" || clue.type === "colCount"));
+      assert.ok(puzzle.cardClues.findIndex((clue) => clue.combined) < 6);
+      assert.ok(puzzle.cardClues.findLastIndex((clue) => clue.combined) > 10);
+    }
+  }
+});
+
+test("corrected Pennsylvania rule references are direct and issue-matched", () => {
+  const blueInvoice = PUZZLES[0].characters.find((person) => person.evidence === "Final invoice");
+  const damagePhoto = PUZZLES[4].characters.find((person) => person.evidence === "Undated damage photograph");
+  assert.deepEqual(blueInvoice.rules.map((rule) => rule.label), ["Pa.R.E. 901"]);
+  assert.deepEqual(damagePhoto.rules.map((rule) => rule.label), ["Pa.R.E. 901"]);
+  const rule701 = PUZZLES[8].ruleCard.rules.find((rule) => rule.label === "Pa.R.E. 701");
+  const rule8036 = PUZZLES[5].ruleCard.rules.find((rule) => rule.label === "Pa.R.E. 803(6)");
+  assert.equal(rule701.url, "https://www.pacodeandbulletin.gov/secure/pacode/data/225/chapter7/.html");
+  assert.equal(rule8036.url, "https://www.pacodeandbulletin.gov/secure/pacode/data/225/chapter8/s803-6.html");
+});
+
+test("the final ruling review precedes completion and decided reviews can reopen", () => {
+  const puzzle = PUZZLES[0];
+  const established = Object.fromEntries(puzzle.solution.map((value, index) => [index, value]));
+  const state = { established, complete: false, reasoning: { 15: { explanation: "Verified final deduction.", supportIndices: [], highlightedIndices: [15] } } };
+  const review = rulingReviewModel(puzzle, state, 15);
+  assert.equal(review.actionLabel, "Complete Case");
+  assert.equal(review.puzzleReasoning, "Verified final deduction.");
+  assert.equal(reviewActionLabel(16, true), "Close Review");
+  assert.ok(rulingReviewModel(puzzle, { ...state, complete: true }, 15), "completed evidence reviews remain available");
+});
+
+test("legacy saved progress is preserved and gains complete review reasoning", () => {
+  const puzzle = PUZZLES[3];
+  const established = Object.fromEntries(puzzle.path.slice(0, 7).map((index) => [index, puzzle.solution[index]]));
+  const legacy = {
+    established, revealed: puzzle.path.slice(0, 7), history: puzzle.path.slice(0, 7),
+    reasoning: { [puzzle.path[0]]: ["Legacy clue text"] }, hints: 2, elapsed: 93
+  };
+  const migrated = migrateProgress(puzzle, legacy);
+  assert.deepEqual(migrated.established, established);
+  assert.deepEqual(migrated.history, legacy.history);
+  assert.equal(migrated.hints, 2);
+  assert.equal(migrated.elapsed, 93);
+  assert.equal(migrated.opened, true);
+  assert.equal(migrated.dataVersion, 3);
+  for (const index of legacy.history) {
+    assert.ok(migrated.reasoning[index].explanation);
+    assert.ok(migrated.reasoning[index].requiredClues.length);
   }
 });
 
@@ -70,10 +120,42 @@ for (const puzzle of PUZZLES) {
     const revealed = [];
     for (const index of report.sequence) {
       const expected = puzzle.solution[index];
-      assert.equal(classifyAttempt(puzzle, established, revealed, index, expected).result, "accepted");
+      const accepted = classifyAttempt(puzzle, established, revealed, index, expected);
+      assert.equal(accepted.result, "accepted");
+      assert.ok(accepted.explanation.endsWith(`${puzzle.characters[index].name}) must be ${expected ? "admitted" : "excluded"}.`));
+      assert.ok(accepted.requiredClues.length >= 1);
+      for (const clueText of accepted.requiredClues) assert.ok(accepted.explanation.includes(clueText));
+      for (const supportIndex of accepted.supportIndices) {
+        assert.notEqual(established[supportIndex], undefined, `${puzzle.title} explanation uses an unestablished ruling`);
+        assert.ok(accepted.explanation.includes(puzzle.characters[supportIndex].name));
+      }
+      if (accepted.isCombined) {
+        assert.ok(accepted.supportIndices.length || accepted.requiredClues.length > 1);
+        assert.match(accepted.establishedText, /Established rulings used:/);
+      }
+      const hint = hintMessage(puzzle, { index, ...accepted });
+      for (const clueText of accepted.requiredClues) assert.ok(hint.includes(clueText));
+      for (const supportIndex of accepted.supportIndices) {
+        assert.ok(hint.includes(puzzle.characters[supportIndex].name));
+      }
       assert.equal(classifyAttempt(puzzle, established, revealed, index, 1 - expected).result, "contradiction");
       established[index] = expected;
       revealed.push(index);
+      const reviewState = {
+        established: { ...established }, complete: false,
+        reasoning: { [index]: {
+          explanation: accepted.explanation, requiredClues: accepted.requiredClues,
+          supportIndices: accepted.supportIndices, highlightedIndices: accepted.highlightedIndices,
+          establishedText: accepted.establishedText
+        } }
+      };
+      const review = rulingReviewModel(puzzle, reviewState, index);
+      assert.ok(review.puzzleReasoning);
+      assert.ok(review.litigationExplanation);
+      assert.ok(review.evidenceIssue);
+      assert.ok(review.foundation);
+      assert.ok(review.paralegalTask);
+      assert.ok(review.rules.length);
     }
   });
 }

@@ -16,8 +16,11 @@ Spatial clues are game mechanics. They are never presented as legal reasons for 
 - `src/puzzles.js` keeps solver-ready puzzle construction separate from the interface. `src/instructional-data.js` contains the case claims, evidence records, Pennsylvania rule references, debriefs, and reflection prompts.
 - `src/logic.js` exhaustively checks all 65,536 possible boards. It powers move validation, contradiction explanations, hints, and build-time verification.
 - Correct rulings reveal a new logic clue plus a separate civil-litigation note. Unsupported choices remain unmarked and contradictions cite only the conflicting visible clue.
+- Every correct ruling automatically opens a Ruling Review. It identifies the complete puzzle deduction, highlights supporting board positions, and separates Puzzle Reasoning from the Civil Litigation Explanation. The final review must be completed before the case debrief opens.
 - Each case begins with a plain-language Rule Card linked to the official Pennsylvania Code. Topics progress from relevance and authentication through writings, digital evidence, personal knowledge, business records, compromise, hearsay purpose, opinion testimony, and Rule 403 balancing.
-- Completion includes a one-minute teaching debrief, two evidence examples, a paralegal-practice note, and an optional discussion or writing prompt. The site never collects student responses.
+- Characters retain their names and portraits but receive a case-specific role explaining how they created, received, observed, maintained, or can identify the current evidence item.
+- The archive shows the evidence focus, estimated time, progress, and a New marker for unopened cases.
+- Completion includes a one-minute teaching debrief, two evidence examples, a paralegal-practice note, and an optional discussion or writing prompt. Instructors can copy the prompt or print a board-free case debrief. The site never collects student responses.
 - Progress, timer state, hints, dimmed clues, and archive completion remain in browser `localStorage`.
 - The static site has no backend, account, analytics, cookies, runtime API, or secrets.
 
@@ -50,11 +53,11 @@ npm test
 npm run check
 ```
 
-The tests exhaustively verify one solution, a supported move at every stage, completion of all sixteen rulings, meaningful combined-clue openings in challenging cases, stable legacy solutions, unique case-specific evidence labels, all instructional fields, initial Rule Cards, and official Pennsylvania Code URLs.
+The tests exhaustively verify one solution, a supported move at every stage, completion of all sixteen rulings, complete deduction explanations and hints, difficulty-specific combined-deduction counts, the final-review sequence, stable legacy solutions, case-specific roles, unique evidence labels, all instructional fields, initial Rule Cards, and official Pennsylvania Code URLs.
 
 ## Add a case
 
-Add the solver specification to `CASES` in `src/puzzles.js`, then add the matching instructional record to `CASE_INSTRUCTION` in `src/instructional-data.js`. Supply exactly sixteen unique evidence items with offered purpose, issue, foundation, ruling reason, paralegal task, and official rule reference. Add the case Rule Card, debrief, examples, practice note, and discussion question.
+Add the solver specification to `CASES` in `src/puzzles.js`, then add the matching instructional record to `CASE_INSTRUCTION` in `src/instructional-data.js`. Supply exactly sixteen unique evidence items with offered purpose, issue, foundation, ruling reason, paralegal task, case-specific role, and at least one official rule reference. Add the case Rule Card, debrief, examples, practice note, and discussion question.
 
 Do not change an issued solution string casually because it maps to saved rulings in `localStorage`. Run the full tests after changing any path, clue, or solution. The exhaustive validator rejects ambiguity or a stalled path. If an issued solution truly must change, add an explicit per-case migration instead of clearing unrelated archive progress.
 

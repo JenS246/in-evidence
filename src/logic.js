@@ -56,6 +56,66 @@ export function enumerateSolutions(puzzle, established = {}, revealedOwners = []
   return solutions;
 }
 
+export function positionLabel(index) {
+  return `${String.fromCharCode(65 + (index % 4))}${Math.floor(index / 4) + 1}`;
+}
+
+function rulingWord(value) {
+  return value === ADMITTED ? "admitted" : "excluded";
+}
+
+function joinStatements(statements) {
+  if (statements.length <= 1) return statements[0] || "";
+  if (statements.length === 2) return `${statements[0]}, while ${statements[1]}`;
+  return `${statements.slice(0, -1).join(", ")}, while ${statements.at(-1)}`;
+}
+
+function establishedSummary(puzzle, established, indices) {
+  const admitted = indices.filter((index) => established[index] === ADMITTED);
+  const excluded = indices.filter((index) => established[index] === EXCLUDED);
+  const describe = (group, value) => {
+    if (!group.length) return "";
+    const labels = group.map((index) => `${positionLabel(index)} (${puzzle.characters[index].name})`);
+    const subject = labels.length === 1 ? labels[0] : `${labels.slice(0, -1).join(", ")} and ${labels.at(-1)}`;
+    return `${subject} ${labels.length === 1 ? "is" : "are"} already ${rulingWord(value)}`;
+  };
+  return joinStatements([describe(admitted, ADMITTED), describe(excluded, EXCLUDED)].filter(Boolean));
+}
+
+function supportForClue(clue, target) {
+  if (Array.isArray(clue.supportIndices)) return clue.supportIndices.filter((index) => index !== target);
+  if (clue.type === "relation") return [clue.a === target ? clue.b : clue.a];
+  if (clue.type === "rowCount") return [0, 1, 2, 3].map((col) => clue.row * 4 + col).filter((index) => index !== target);
+  if (clue.type === "colCount") return [0, 1, 2, 3].map((row) => row * 4 + clue.col).filter((index) => index !== target);
+  if (clue.type === "neighborCount") return neighbors(clue.index).filter((index) => index !== target);
+  return [];
+}
+
+export function deductionDetails(puzzle, established, index, value, reasons) {
+  const usableReasons = reasons.filter(Boolean);
+  const supportIndices = [...new Set(usableReasons.flatMap((clue) => supportForClue(clue, index)))]
+    .filter((supportIndex) => established[supportIndex] !== undefined);
+  const clauses = usableReasons.map((clue) => {
+    if (clue.type === "fixed") return clue.text;
+    const supports = supportForClue(clue, index).filter((supportIndex) => established[supportIndex] !== undefined);
+    const known = establishedSummary(puzzle, established, supports);
+    return known ? `${clue.text} ${known}.` : clue.text;
+  });
+  const target = `${positionLabel(index)} (${puzzle.characters[index].name})`;
+  const conclusion = `Therefore, ${target} must be ${rulingWord(value)}.`;
+  const establishedText = supportIndices.length
+    ? `Established rulings used: ${establishedSummary(puzzle, established, supportIndices)}.`
+    : "No earlier ruling is needed for this direct clue.";
+  return {
+    explanation: [...clauses, conclusion].join(" "),
+    requiredClues: usableReasons.map((clue) => clue.text),
+    supportIndices,
+    highlightedIndices: [...new Set([index, ...supportIndices])],
+    establishedText,
+    isCombined: usableReasons.length > 1 || supportIndices.length > 0
+  };
+}
+
 export function deductionFor(puzzle, established, revealedOwners, index) {
   const solutions = enumerateSolutions(puzzle, established, revealedOwners);
   if (!solutions.length) return null;
@@ -64,7 +124,11 @@ export function deductionFor(puzzle, established, revealedOwners, index) {
   const clues = activeClues(puzzle, revealedOwners);
   const reasons = clues.filter((clue) => clue.targets?.includes(index));
   const reason = reasons[reasons.length - 1] || clues[clues.length - 1];
-  return { value, reason, reasons: reasons.length ? reasons : [reason], possibilities: solutions.length };
+  const requiredReasons = reasons.length ? reasons : [reason];
+  return {
+    value, reason, reasons: requiredReasons, possibilities: solutions.length,
+    ...deductionDetails(puzzle, established, index, value, requiredReasons)
+  };
 }
 
 export function classifyAttempt(puzzle, established, revealedOwners, index, value) {

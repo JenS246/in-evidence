@@ -1,4 +1,5 @@
 import { CASE_INSTRUCTION } from "./instructional-data.js";
+import { neighbors } from "./logic.js";
 
 const CAST = [
   ["Mina", "court reporter"], ["Theo", "delivery driver"], ["Odette", "neighbor"],
@@ -25,11 +26,7 @@ function positionLabel(index) {
   return `${String.fromCharCode(65 + (index % 4))}${Math.floor(index / 4) + 1}`;
 }
 
-function orderFor(mode, difficulty, number) {
-  if (difficulty === "Challenging") {
-    if (number === 8) return [1, 0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
-    return [0, 2, 1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
-  }
+function orderFor(mode) {
   if (mode === "col") return Array.from({ length: 16 }, (_, i) => (i % 4) * 4 + Math.floor(i / 4));
   return Array.from({ length: 16 }, (_, i) => i);
 }
@@ -37,10 +34,10 @@ function orderFor(mode, difficulty, number) {
 function arrange(shift, items, solution) {
   return Array.from({ length: 16 }, (_, i) => {
     const art = (i + shift) % 16;
-    const [name, role] = CAST[art];
+    const [name, defaultRole] = CAST[art];
     const item = items[i];
     return {
-      name, role, art, ...item,
+      name, role: item.caseRole || defaultRole, art, ...item,
       rulingExplanation: `The court ${solution[i] ? "admitted" : "excluded"} this item because ${item.legalReason}.`
     };
   });
@@ -64,8 +61,7 @@ function buildPuzzle(spec, number) {
   const instruction = CASE_INSTRUCTION.find((item) => item.slug === spec.slug);
   const solution = [...spec.solution].map(Number);
   const characters = arrange(spec.shift, instruction.items, solution);
-  const path = orderFor(spec.mode, spec.difficulty, number);
-  const clueMode = spec.difficulty === "Challenging" ? "row" : spec.mode;
+  const path = orderFor(spec.mode);
   const initialClues = [{
     id: `${spec.slug}-filed`, type: "fixed", index: path[0], value: solution[path[0]], targets: [path[0]],
     text: `The clerk's opening note establishes that ${characters[path[0]].name}'s evidence was ${solution[path[0]] ? "admitted" : "excluded"}.`,
@@ -73,44 +69,53 @@ function buildPuzzle(spec, number) {
   }];
   const cardClues = [];
 
-  if (spec.difficulty === "Challenging") {
-    const target = path[1];
-    const rowCount = solution.slice(0, 4).reduce((a, b) => a + b, 0);
-    initialClues.push({
-      id: `${spec.slug}-opening-count`, type: "rowCount", row: 0, value: rowCount, targets: [target],
-      text: `Exactly ${rowCount} items were admitted in Row 1.`, label: "Filed with the case"
-    });
-  }
-
   for (let step = 0; step < 15; step += 1) {
     const owner = path[step];
     const target = path[step + 1];
-    if (spec.difficulty === "Challenging" && step === 0) {
-      const pair = number === 8 ? [2, 3] : [1, 3];
-      cardClues.push({
-        id: `${spec.slug}-paired-opening`, owner, type: "relation", a: pair[0], b: pair[1], relation: "same", targets: [target],
-        text: `${characters[pair[0]].name}'s and ${characters[pair[1]].name}'s evidence received the same ruling.`,
-        label: `Revealed by ${characters[owner].name}`, requiresTwoClues: true
-      });
-      continue;
-    }
-    const closesGroup = step % 4 === 2;
-    if (closesGroup) {
+    const countSteps = new Set([2, 6, 10, 14]);
+    const neighborSteps = new Set(spec.difficulty === "Introductory" ? [] : [4, 12]);
+    const relationSteps = new Set(spec.difficulty === "Introductory" ? [7] : spec.difficulty === "Standard" ? [8] : [1, 8, 13]);
+    const clueKind = countSteps.has(step) && spec.difficulty !== "Introductory" ? "count"
+      : neighborSteps.has(step) ? "neighbor"
+        : relationSteps.has(step) ? "relation" : "fixed";
+
+    if (clueKind === "count") {
       const group = Math.floor((step + 1) / 4);
-      const value = clueMode === "row"
+      const value = spec.mode === "row"
         ? solution.slice(group * 4, group * 4 + 4).reduce((a, b) => a + b, 0)
         : [0, 1, 2, 3].reduce((sum, row) => sum + solution[row * 4 + group], 0);
-      const label = clueMode === "row" ? `Row ${group + 1}` : `Column ${String.fromCharCode(65 + group)}`;
+      const label = spec.mode === "row" ? `Row ${group + 1}` : `Column ${String.fromCharCode(65 + group)}`;
+      const supportIndices = spec.mode === "row"
+        ? [0, 1, 2, 3].map((col) => group * 4 + col).filter((index) => index !== target)
+        : [0, 1, 2, 3].map((row) => row * 4 + group).filter((index) => index !== target);
       cardClues.push({
-        id: `${spec.slug}-count-${step}`, owner, type: clueMode === "row" ? "rowCount" : "colCount",
-        ...(clueMode === "row" ? { row: group } : { col: group }), value, targets: [target],
-        text: `Exactly ${value} ${value === 1 ? "item was" : "items were"} admitted in ${label}.`, label: `Revealed by ${characters[owner].name}`
+        id: `${spec.slug}-count-${step}`, owner, type: spec.mode === "row" ? "rowCount" : "colCount",
+        ...(spec.mode === "row" ? { row: group } : { col: group }), value, targets: [target], supportIndices, combined: true,
+        text: `${label} contains exactly ${value} admitted ${value === 1 ? "item" : "items"}.`, label: `Revealed by ${characters[owner].name}`
       });
-    } else {
+    } else if (clueKind === "neighbor") {
+      const establishedBeforeTarget = new Set(path.slice(0, step + 1));
+      const anchor = Array.from({ length: 16 }, (_, index) => index).find((index) =>
+        neighbors(index).includes(target) && neighbors(index).every((neighbor) => neighbor === target || establishedBeforeTarget.has(neighbor))
+      );
+      const adjacent = neighbors(anchor);
+      const value = adjacent.reduce((sum, index) => sum + solution[index], 0);
+      cardClues.push({
+        id: `${spec.slug}-neighbors-${step}`, owner, type: "neighborCount", index: anchor, value, targets: [target],
+        supportIndices: adjacent.filter((index) => index !== target), combined: true,
+        text: `Exactly ${value} of the positions neighboring ${positionLabel(anchor)} have admitted evidence.`, label: `Revealed by ${characters[owner].name}`
+      });
+    } else if (clueKind === "relation") {
       const relation = solution[owner] === solution[target] ? "same" : "opposite";
       cardClues.push({
-        id: `${spec.slug}-link-${step}`, owner, type: "relation", a: owner, b: target, relation, targets: [target],
+        id: `${spec.slug}-link-${step}`, owner, type: "relation", a: owner, b: target, relation, targets: [target], supportIndices: [owner], combined: true,
         text: relationText(owner, target, relation, characters), label: `Revealed by ${characters[owner].name}`
+      });
+    } else {
+      cardClues.push({
+        id: `${spec.slug}-direct-${step}`, owner, type: "fixed", index: target, value: solution[target], targets: [target], supportIndices: [], combined: false,
+        text: `The revealed file note establishes that ${characters[target].name}'s evidence was ${solution[target] ? "admitted" : "excluded"}.`,
+        label: `Revealed by ${characters[owner].name}`
       });
     }
   }
@@ -123,6 +128,7 @@ function buildPuzzle(spec, number) {
     ...instruction,
     ruleCard: { timing: "initial", ...instruction.ruleCard },
     summary: instruction.claim,
+    estimatedMinutes: spec.difficulty === "Introductory" ? 8 : spec.difficulty === "Standard" ? 12 : 16,
     number, characters, solution, path, initialClues, cardClues
   };
 }
