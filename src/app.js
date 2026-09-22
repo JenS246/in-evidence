@@ -1,5 +1,5 @@
 import { PUZZLES } from "./puzzles.js";
-import { ADMITTED, EXCLUDED, classifyAttempt, nextDeduction } from "./logic.js";
+import { ADMITTED, EXCLUDED, activeClues, classifyAttempt, nextDeduction } from "./logic.js";
 
 const $ = (selector) => document.querySelector(selector);
 const STORAGE_KEY = "in-evidence-progress-v1";
@@ -8,7 +8,7 @@ let timerInterval;
 let toastTimer;
 
 function freshState() {
-  return { established: {}, revealed: [], history: [], hints: 0, dimmed: [], timerOn: false, elapsed: 0, startedAt: null, complete: false };
+  return { established: {}, revealed: [], history: [], reasoning: {}, hints: 0, dimmed: [], timerOn: false, elapsed: 0, startedAt: null, complete: false, dataVersion: 2 };
 }
 
 function loadAll() {
@@ -16,7 +16,25 @@ function loadAll() {
 }
 
 let allProgress = loadAll();
-let state = { ...freshState(), ...(allProgress[PUZZLES[puzzleIndex].slug] || {}) };
+
+function migrateState(puzzle, saved = {}) {
+  const next = { ...freshState(), ...saved };
+  const entries = Object.entries(next.established || {});
+  if (entries.some(([index, value]) => puzzle.solution[Number(index)] !== value)) return freshState();
+  next.revealed = [...new Set((next.revealed || []).filter((index) => Number.isInteger(index) && index >= 0 && index < 16))];
+  next.history = (next.history || []).filter((index) => next.established[index] !== undefined);
+  next.reasoning ||= {};
+  const clues = activeClues(puzzle, next.revealed);
+  for (const [index] of entries) {
+    if (next.reasoning[index]?.length) continue;
+    const supporting = clues.filter((clue) => clue.targets?.includes(Number(index))).map((clue) => clue.text);
+    next.reasoning[index] = supporting.length ? supporting : ["The visible clues established this ruling when it was entered."];
+  }
+  next.dataVersion = 2;
+  return next;
+}
+
+let state = migrateState(PUZZLES[puzzleIndex], allProgress[PUZZLES[puzzleIndex].slug]);
 
 function save() {
   if (state.timerOn && state.startedAt) state.elapsed = Math.floor((Date.now() - state.startedAt) / 1000);
@@ -55,11 +73,16 @@ function render() {
   $("#caseMeta").textContent = `CASE ${String(puzzle.number).padStart(2, "0")} / ${puzzle.difficulty}`;
   $("#puzzleTitle").textContent = puzzle.title;
   $("#caseSummary").textContent = puzzle.summary;
+  $("#caseIssues").innerHTML = `<div><dt>Disputed issue</dt><dd>${puzzle.disputedIssue}</dd></div><div><dt>Evidence focus</dt><dd>${puzzle.evidenceFocus}</dd></div>`;
   $("#progressText").textContent = `${count} of 16 rulings established`;
   $("#timerToggle").setAttribute("aria-pressed", String(state.timerOn));
   $("#timerLabel").textContent = state.timerOn ? formatTime(state.elapsed) : "Timer off";
   $("#undoButton").disabled = !state.history.length;
-  $("#ruleCard").innerHTML = puzzle.ruleCard ? `<article class="rule-card"><strong>Rule of Evidence</strong><p>${puzzle.ruleCard}</p></article>` : "";
+  $("#ruleCard").innerHTML = puzzle.ruleCard ? `<article class="rule-card">
+    <small>RULE CARD</small><strong>${puzzle.ruleCard.title}</strong>
+    <p>${puzzle.ruleCard.plain}</p><p><b>Simplified for this case:</b> ${puzzle.ruleCard.simplified}</p>
+    <div class="rule-links">${puzzle.ruleCard.rules.map((rule) => `<a href="${rule.url}" target="_blank" rel="noreferrer">${rule.label}<span class="sr-only"> opens official Pennsylvania Code in a new tab</span></a>`).join("")}</div>
+  </article>` : "";
 
   $("#clueList").innerHTML = [...puzzle.initialClues, ...puzzle.cardClues.filter((clue) => state.revealed.includes(clue.owner))]
     .map((clue, i) => `<article class="clue-paper ${state.dimmed.includes(clue.id) ? "is-dimmed" : ""}">
@@ -127,8 +150,8 @@ function makeRuling(index, value, keepDialog = false) {
   state.established[index] = value;
   state.revealed.push(index);
   state.history.push(index);
-  const source = outcome.reason?.text || "the clues on record";
-  announce(`${statusName(value)}. Supported by: “${source}”`, "accepted");
+  state.reasoning[index] = (outcome.reasons || [outcome.reason]).filter(Boolean).map((clue) => clue.text);
+  announce(`${statusName(value)}. The visible clues establish this ruling.`, "accepted");
   if (state.timerOn && !state.startedAt) state.startedAt = Date.now();
   save();
   render();
@@ -141,13 +164,23 @@ function openEvidence(index) {
   const person = puzzle.characters[index];
   const value = state.established[index];
   const clue = puzzle.cardClues.find((item) => item.owner === index);
+  const reasoning = state.reasoning[index] || ["The visible clues established this ruling when it was entered."];
   $("#evidenceDetail").innerHTML = `
     <div class="detail-top">
       <div class="detail-portrait portrait" style="${portraitStyle(person.art)}" role="img" aria-label="Illustration of ${person.name}"></div>
       <div><p class="dialog-label">POSITION ${String.fromCharCode(65 + index % 4)}${Math.floor(index / 4) + 1}</p><h2>${person.name}</h2><p>${person.role}</p><div class="detail-evidence"><b>${evidenceGlyph(person.evidenceType)}</b><span>Potential evidence<strong>${person.evidence}</strong></span></div></div>
     </div>
-    ${value === undefined ? `<div class="detail-question"><h3>What does the record establish?</h3><div class="detail-actions"><button data-modal-ruling="1" data-index="${index}"><span>✓</span>ADMITTED</button><button data-modal-ruling="0" data-index="${index}"><span>×</span>EXCLUDED</button></div></div>` : `<div class="detail-ruling status-${value}"><span>${value ? "✓" : "×"}</span><strong>${statusName(value)}</strong></div>`}
-    <div class="detail-clue ${state.revealed.includes(index) ? "is-open" : ""}"><small>${state.revealed.includes(index) ? clue?.label || "Closing notation" : "SEALED CLUE"}</small><p>${state.revealed.includes(index) ? clue?.text || "The record is complete." : "Establish this ruling to add the next clue to the docket."}</p></div>`;
+    <section class="offer-panel"><small>OFFERED TO PROVE</small><p>${person.offeredToProve}</p></section>
+    ${value === undefined ? `<div class="detail-question"><p><strong>Question to consider:</strong> ${person.questionToConsider}</p><h3>What do the visible logic clues establish?</h3><div class="detail-actions"><button data-modal-ruling="1" data-index="${index}"><span>✓</span>ADMITTED</button><button data-modal-ruling="0" data-index="${index}"><span>×</span>EXCLUDED</button></div></div>` : `
+      <div class="detail-ruling status-${value}"><span>${value ? "✓" : "×"}</span><strong>${statusName(value)}</strong></div>
+      <div class="learning-sections">
+        <section><small>REASONING</small>${reasoning.map((text) => `<p>${text}</p>`).join("")}</section>
+        <section class="litigation-note"><small>CIVIL LITIGATION NOTE</small><p>${person.rulingExplanation}</p></section>
+        <dl class="evidence-facts"><div><dt>Evidence issue</dt><dd>${person.evidenceIssue}</dd></div><div><dt>Foundation</dt><dd>${person.foundation}</dd></div></dl>
+        <section class="paralegal-task"><small>PARALEGAL CONNECTION</small><p>${person.paralegalTask}</p></section>
+        <a class="official-rule-link" href="${person.ruleUrl}" target="_blank" rel="noreferrer">Read ${person.ruleReference} in the official Pennsylvania Code<span aria-hidden="true"> ↗</span></a>
+      </div>`}
+    <div class="detail-clue ${state.revealed.includes(index) ? "is-open" : ""}"><small>${state.revealed.includes(index) ? "NEXT LOGIC CLUE" : "SEALED LOGIC CLUE"}</small><p>${state.revealed.includes(index) ? clue?.text || "The record is complete." : "Establish this ruling to add the next logic clue to the docket."}</p></div>`;
   if (!$("#evidenceDialog").open) $("#evidenceDialog").showModal();
 }
 
@@ -162,7 +195,14 @@ function finishPuzzle() {
   $("#completionContent").innerHTML = `
     <p class="dialog-label">CASE ${String(puzzle.number).padStart(2, "0")} CLOSED</p>
     <h2>The record is complete.</h2>
-    <p>The court admitted ${admitted} items and excluded ${excluded}. Every ruling followed from the case record.</p>
+    <p>The court admitted ${admitted} items and excluded ${excluded}. Every ruling followed from the visible logic record.</p>
+    <div class="case-debrief">
+      <section><small>DISPUTED ISSUE</small><p>${puzzle.disputedIssue}</p></section>
+      <section><small>PRINCIPAL RULES</small><p>${puzzle.ruleCard.rules.map((rule) => rule.label).join(" and ")}</p></section>
+      <section><small>WHAT MATTERED</small><p>${puzzle.debrief}</p><ul>${puzzle.examples.map((index) => `<li><strong>${puzzle.characters[index].evidence}:</strong> ${puzzle.characters[index].rulingExplanation}</li>`).join("")}</ul></section>
+      <section><small>PARALEGAL PRACTICE</small><p>${puzzle.paralegalPractice}</p></section>
+      <section class="reflection"><small>DISCUSS OR WRITE</small><p>${puzzle.discussionQuestion}</p></section>
+    </div>
     <div class="completion-stats"><span><small>TIME</small><strong>${formatTime(state.elapsed)}</strong></span><span><small>HINTS</small><strong>${state.hints}</strong></span></div>
     <div class="share-result"><code>IN EVIDENCE #${puzzle.number}<br>${["🟦🟨🟥🟦", "🟨🟥🟦🟨", "🟥🟦🟨🟥"][puzzle.number % 3]}<br>${state.hints} hint${state.hints === 1 ? "" : "s"} / ${formatTime(state.elapsed)}</code><button id="shareButton">Copy result</button></div>
     <div class="completion-actions"><button id="replayButton">Replay</button><button class="primary" id="nextButton">Next case</button></div>`;
@@ -180,6 +220,7 @@ function undo() {
   const index = state.history.pop();
   if (index === undefined) return;
   delete state.established[index];
+  delete state.reasoning[index];
   const position = state.revealed.lastIndexOf(index);
   if (position >= 0) state.revealed.splice(position, 1);
   state.complete = false;
@@ -198,13 +239,14 @@ function hint() {
   if (!next) return;
   state.hints += 1;
   save(); render();
-  announce(`Look at ${current().characters[next.index].name} in position ${String.fromCharCode(65 + next.index % 4)}${Math.floor(next.index / 4) + 1}. Use: “${next.reason.text}”`);
+  const clueText = (next.reasons || [next.reason]).filter(Boolean).map((clue) => `“${clue.text}”`).join(" Also use: ");
+  announce(`Look at ${current().characters[next.index].name} in position ${String.fromCharCode(65 + next.index % 4)}${Math.floor(next.index / 4) + 1}. Use: ${clueText}`);
 }
 
 function choosePuzzle(index) {
   save();
   puzzleIndex = index;
-  state = { ...freshState(), ...(allProgress[current().slug] || {}) };
+  state = migrateState(current(), allProgress[current().slug]);
   $("#archiveDialog").close();
   startClock(); render();
   window.scrollTo({ top: 0, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });

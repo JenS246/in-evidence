@@ -62,8 +62,9 @@ export function deductionFor(puzzle, established, revealedOwners, index) {
   const value = solutions[0][index];
   if (!solutions.every((solution) => solution[index] === value)) return null;
   const clues = activeClues(puzzle, revealedOwners);
-  const reason = [...clues].reverse().find((clue) => clue.targets?.includes(index)) || clues[clues.length - 1];
-  return { value, reason, possibilities: solutions.length };
+  const reasons = clues.filter((clue) => clue.targets?.includes(index));
+  const reason = reasons[reasons.length - 1] || clues[clues.length - 1];
+  return { value, reason, reasons: reasons.length ? reasons : [reason], possibilities: solutions.length };
 }
 
 export function classifyAttempt(puzzle, established, revealedOwners, index, value) {
