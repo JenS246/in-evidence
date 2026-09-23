@@ -1,7 +1,7 @@
 import { PUZZLES } from "./puzzles.js";
 import { ADMITTED, EXCLUDED, classifyAttempt, nextDeduction, positionLabel } from "./logic.js";
 import { freshProgressState, migrateProgress } from "./progress.js";
-import { hintMessage, rulingReviewModel } from "./review.js";
+import { boardCompletionAvailable, hintMessage, renderMoreCaseDetails, rulingReviewModel, timerResultLabel } from "./review.js";
 
 const $ = (selector) => document.querySelector(selector);
 const STORAGE_KEY = "in-evidence-progress-v1";
@@ -62,6 +62,7 @@ function render() {
   $("#timerToggle").setAttribute("aria-pressed", String(state.timerOn));
   $("#timerLabel").textContent = state.timerOn ? formatTime(state.elapsed) : "Timer off";
   $("#undoButton").disabled = !state.history.length;
+  $("#caseReady").hidden = !boardCompletionAvailable(state);
   $("#ruleCard").innerHTML = puzzle.ruleCard ? `<article class="rule-card">
     <small>RULE CARD</small><strong>${puzzle.ruleCard.title}</strong>
     <p>${puzzle.ruleCard.plain}</p><p><b>Simplified for this case:</b> ${puzzle.ruleCard.simplified}</p>
@@ -158,14 +159,13 @@ function openEvidence(index) {
   const puzzle = current();
   const person = puzzle.characters[index];
   const value = state.established[index];
-  const clue = puzzle.cardClues.find((item) => item.owner === index);
   const review = rulingReviewModel(puzzle, state, index);
   reviewReturnIndex = index;
   reviewSupportIndices = review?.supportIndices || [];
   render();
-  const supportingText = review?.supportIndices.length
-    ? `Supporting board positions: ${review.supportIndices.map((supportIndex) => `${positionLabel(supportIndex)} (${puzzle.characters[supportIndex].name})`).join(", ")}.`
-    : "This direct clue does not depend on an earlier ruling.";
+  const supportingText = review?.supportPositions.length
+    ? `Uses ${review.supportPositions.length === 1 ? review.supportPositions[0] : `${review.supportPositions.slice(0, -1).join(", ")} and ${review.supportPositions.at(-1)}`}`
+    : "";
   $("#evidenceDetail").innerHTML = `
     <div class="detail-top">
       <div class="detail-portrait portrait" style="${portraitStyle(person.art)}" role="img" aria-label="Illustration of ${person.name}"></div>
@@ -176,14 +176,12 @@ function openEvidence(index) {
       <section class="review-heading" aria-labelledby="reviewHeading"><p class="dialog-label">RULING REVIEW</p><h3 id="reviewHeading" tabindex="-1">${review.accessibleHeading}</h3>${showFirstReviewNote ? `<p class="first-review-note">Your deduction opened the legal explanation.</p>` : ""}</section>
       <div class="detail-ruling status-${value}"><span>${value ? "✓" : "×"}</span><strong>${statusName(value)}</strong></div>
       <div class="learning-sections">
-        <section><small>PUZZLE REASONING</small><p>${review.puzzleReasoning}</p><p class="supporting-positions">${supportingText}</p></section>
-        <section class="litigation-note"><small>CIVIL LITIGATION EXPLANATION</small><p>${review.litigationExplanation}</p></section>
-        <dl class="evidence-facts"><div><dt>Evidence issue</dt><dd>${person.evidenceIssue}</dd></div><div><dt>Foundation</dt><dd>${person.foundation}</dd></div></dl>
-        <section class="paralegal-task"><small>PARALEGAL CONNECTION</small><p>${person.paralegalTask}</p></section>
-        <section class="applicable-rules"><small>APPLICABLE PENNSYLVANIA ${person.rules.length === 1 ? "RULE" : "RULES"}</small><div>${person.rules.map((rule) => `<a href="${rule.url}" target="_blank" rel="noreferrer">${rule.label}<span class="sr-only"> opens official Pennsylvania Code in a new tab</span></a>`).join("")}</div></section>
+        <section><small>PUZZLE REASONING</small><p>${review.puzzleReasoning}</p>${supportingText ? `<p class="supporting-positions">${supportingText}</p>` : ""}</section>
+        <section class="litigation-note"><small>CIVIL LITIGATION EXPLANATION</small><p>${review.litigationExplanation}</p><p class="evidence-issue"><strong>Evidence issue:</strong> ${review.evidenceIssue}</p></section>
+        ${renderMoreCaseDetails(review)}
       </div>
       <div class="review-actions"><button class="primary" data-continue-review="${review.actionLabel === "Complete Case" ? "complete" : "close"}">${review.actionLabel}</button></div>`}
-    <div class="detail-clue ${state.revealed.includes(index) ? "is-open" : ""}"><small>${state.revealed.includes(index) ? "NEXT LOGIC CLUE" : "SEALED LOGIC CLUE"}</small><p>${state.revealed.includes(index) ? clue?.text || "The record is complete." : "Establish this ruling to add the next logic clue to the docket."}</p></div>`;
+    ${value === undefined ? `<div class="detail-clue"><small>SEALED LOGIC CLUE</small><p>Establish this ruling to add the next logic clue to the docket.</p></div>` : ""}`;
   const dialog = $("#evidenceDialog");
   dialog.setAttribute("aria-labelledby", value === undefined ? "evidenceName" : "reviewHeading");
   if (!dialog.open) dialog.showModal();
@@ -191,11 +189,16 @@ function openEvidence(index) {
 }
 
 function finishPuzzle() {
+  if (!boardCompletionAvailable(state)) return;
+  if (state.timerOn && state.startedAt) state.elapsed = Math.floor((Date.now() - state.startedAt) / 1000);
   state.complete = true;
   state.timerOn = false;
+  state.startedAt = null;
   clearInterval(timerInterval);
   save();
+  render();
   const puzzle = current();
+  const timeLabel = timerResultLabel(state);
   const admitted = puzzle.solution.reduce((sum, value) => sum + value, 0);
   const excluded = 16 - admitted;
   $("#completionContent").innerHTML = `
@@ -210,8 +213,8 @@ function finishPuzzle() {
       <section class="reflection"><small>DISCUSS OR WRITE</small><p>${puzzle.discussionQuestion}</p></section>
     </div>
     <div class="classroom-actions"><button id="copyQuestionButton">Copy discussion question</button><button id="printDebriefButton">Print case debrief</button></div>
-    <div class="completion-stats"><span><small>TIME</small><strong>${formatTime(state.elapsed)}</strong></span><span><small>HINTS</small><strong>${state.hints}</strong></span></div>
-    <div class="share-result"><code>IN EVIDENCE #${puzzle.number}<br>${["🟦🟨🟥🟦", "🟨🟥🟦🟨", "🟥🟦🟨🟥"][puzzle.number % 3]}<br>${state.hints} hint${state.hints === 1 ? "" : "s"} / ${formatTime(state.elapsed)}</code><button id="shareButton">Copy result</button></div>
+    <div class="completion-stats"><span><small>TIME</small><strong>${timeLabel}</strong></span><span><small>HINTS</small><strong>${state.hints}</strong></span></div>
+    <div class="share-result"><code>IN EVIDENCE #${puzzle.number}<br>${["🟦🟨🟥🟦", "🟨🟥🟦🟨", "🟥🟦🟨🟥"][puzzle.number % 3]}<br>${state.hints} hint${state.hints === 1 ? "" : "s"} / ${timeLabel}</code><button id="shareButton">Copy result</button></div>
     <div class="completion-actions"><button id="replayButton">Replay</button><button class="primary" id="nextButton">Next case</button></div>`;
   if ($("#evidenceDialog").open) $("#evidenceDialog").close();
   $("#completionDialog").showModal();
@@ -331,11 +334,14 @@ document.addEventListener("click", (event) => {
 $("#undoButton").addEventListener("click", undo);
 $("#hintButton").addEventListener("click", hint);
 $("#resetButton").addEventListener("click", () => { if (confirm("Reset every ruling in this case?")) resetPuzzle(); });
+$("#completeCaseButton").addEventListener("click", finishPuzzle);
 $("#archiveButton").addEventListener("click", () => $("#archiveDialog").showModal());
 $("#homeButton").addEventListener("click", () => $("#archiveDialog").showModal());
 $("#helpButton").addEventListener("click", () => $("#helpDialog").showModal());
 $("#timerToggle").addEventListener("click", () => {
+  if (state.timerOn && state.startedAt) state.elapsed = Math.floor((Date.now() - state.startedAt) / 1000);
   state.timerOn = !state.timerOn;
+  if (state.timerOn) state.timerUsed = true;
   state.startedAt = state.timerOn ? Date.now() - state.elapsed * 1000 : null;
   save(); startClock(); render();
 });

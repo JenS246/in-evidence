@@ -38,9 +38,15 @@ function arrange(shift, items, solution) {
     const item = items[i];
     return {
       name, role: item.caseRole || defaultRole, art, ...item,
-      rulingExplanation: `The court ${solution[i] ? "admitted" : "excluded"} this item because ${item.legalReason}.`
+      rulingExplanation: normalizeLegalReason(item.legalReason)
     };
   });
+}
+
+export function normalizeLegalReason(reason) {
+  const trimmed = reason.trim();
+  const sentence = `${trimmed.charAt(0).toUpperCase()}${trimmed.slice(1)}`;
+  return /[.!?]$/.test(sentence) ? sentence : `${sentence}.`;
 }
 
 function relationText(a, b, relation, characters) {
@@ -74,7 +80,7 @@ function buildPuzzle(spec, number) {
     const target = path[step + 1];
     const countSteps = new Set([2, 6, 10, 14]);
     const neighborSteps = new Set(spec.difficulty === "Introductory" ? [] : [4, 12]);
-    const relationSteps = new Set(spec.difficulty === "Introductory" ? [7] : spec.difficulty === "Standard" ? [8] : [1, 8, 13]);
+    const relationSteps = new Set(spec.difficulty === "Introductory" ? [1, 4, 7, 10, 13] : spec.difficulty === "Standard" ? [8] : [1, 8, 13]);
     const clueKind = countSteps.has(step) && spec.difficulty !== "Introductory" ? "count"
       : neighborSteps.has(step) ? "neighbor"
         : relationSteps.has(step) ? "relation" : "fixed";
@@ -108,7 +114,7 @@ function buildPuzzle(spec, number) {
     } else if (clueKind === "relation") {
       const relation = solution[owner] === solution[target] ? "same" : "opposite";
       cardClues.push({
-        id: `${spec.slug}-link-${step}`, owner, type: "relation", a: owner, b: target, relation, targets: [target], supportIndices: [owner], combined: true,
+        id: `${spec.slug}-link-${step}`, owner, type: "relation", a: owner, b: target, relation, targets: [target], supportIndices: [owner], combined: false,
         text: relationText(owner, target, relation, characters), label: `Revealed by ${characters[owner].name}`
       });
     } else {

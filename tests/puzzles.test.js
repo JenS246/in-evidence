@@ -1,9 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { PUZZLES } from "../src/puzzles.js";
+import { normalizeLegalReason, PUZZLES } from "../src/puzzles.js";
 import { classifyAttempt, deductionFor, verifyPuzzle } from "../src/logic.js";
 import { migrateProgress } from "../src/progress.js";
-import { hintMessage, reviewActionLabel, rulingReviewModel } from "../src/review.js";
+import { boardCompletionAvailable, hintMessage, renderMoreCaseDetails, reviewActionLabel, rulingReviewModel, timerResultLabel } from "../src/review.js";
 
 const LEGACY_SOLUTIONS = {
   "blue-tile": "1011001010010110", "garden-goose": "0110100111001001",
@@ -38,6 +38,9 @@ test("launch collection contains ten complete handcrafted cases", () => {
       assert.ok(person.evidenceIssue);
       assert.ok(person.foundation);
       assert.ok(person.rulingExplanation);
+      assert.doesNotMatch(person.rulingExplanation, /^The court (admitted|excluded) this item because/i);
+      assert.match(person.rulingExplanation, /^[A-Z]/);
+      assert.match(person.rulingExplanation, /[.!?]$/);
       assert.ok(person.paralegalTask);
       assert.ok(person.rules.length >= 1);
       for (const rule of person.rules) {
@@ -56,7 +59,12 @@ test("launch collection contains ten complete handcrafted cases", () => {
 test("difficulty levels have distinct combined-deduction profiles", () => {
   for (const puzzle of PUZZLES) {
     const combined = puzzle.cardClues.filter((clue) => clue.combined).length;
-    if (puzzle.difficulty === "Introductory") assert.ok(combined <= 1, `${puzzle.title} has too many combined deductions`);
+    if (puzzle.difficulty === "Introductory") {
+      const simpleRelations = puzzle.cardClues.filter((clue) => clue.type === "relation" && !clue.combined);
+      assert.ok(simpleRelations.length >= 3, `${puzzle.title} needs at least three simple relational deductions`);
+      assert.ok(combined <= 1, `${puzzle.title} has too many genuinely combined deductions`);
+      for (const clue of simpleRelations) assert.ok(puzzle.path.indexOf(clue.owner) < puzzle.path.indexOf(clue.targets[0]));
+    }
     if (puzzle.difficulty === "Standard") assert.ok(combined >= 3, `${puzzle.title} needs at least three combined deductions`);
     if (puzzle.difficulty === "Challenging") {
       assert.ok(combined >= 4, `${puzzle.title} needs at least four combined deductions`);
@@ -87,8 +95,28 @@ test("the final ruling review precedes completion and decided reviews can reopen
   const review = rulingReviewModel(puzzle, state, 15);
   assert.equal(review.actionLabel, "Complete Case");
   assert.equal(review.puzzleReasoning, "Verified final deduction.");
+  assert.equal(reviewActionLabel(1, false), "Continue to Next Deduction");
   assert.equal(reviewActionLabel(16, true), "Close Review");
+  assert.equal(boardCompletionAvailable(state), true);
+  assert.equal(boardCompletionAvailable({ ...state, complete: true }), false);
   assert.ok(rulingReviewModel(puzzle, { ...state, complete: true }, 15), "completed evidence reviews remain available");
+  const details = renderMoreCaseDetails(review);
+  assert.match(details, /<details class="case-details">/);
+  assert.match(details, /<summary>More Case Details<\/summary>/);
+  assert.ok(details.includes(review.foundation));
+  assert.ok(details.includes(review.paralegalTask));
+  for (const rule of review.rules) assert.ok(details.includes(rule.url));
+});
+
+test("timer results distinguish an unused timer from elapsed play", () => {
+  assert.equal(timerResultLabel({ timerUsed: false, elapsed: 0 }), "Timer off");
+  assert.equal(timerResultLabel({ timerUsed: true, elapsed: 0 }), "00:00");
+  assert.equal(timerResultLabel({ timerUsed: true, elapsed: 125 }), "02:05");
+});
+
+test("legal-reason normalization changes presentation without changing substance", () => {
+  assert.equal(normalizeLegalReason("the signed writing supplied the terms"), "The signed writing supplied the terms.");
+  assert.equal(normalizeLegalReason("Authentication remained disputed?"), "Authentication remained disputed?");
 });
 
 test("legacy saved progress is preserved and gains complete review reasoning", () => {
@@ -104,11 +132,23 @@ test("legacy saved progress is preserved and gains complete review reasoning", (
   assert.equal(migrated.hints, 2);
   assert.equal(migrated.elapsed, 93);
   assert.equal(migrated.opened, true);
-  assert.equal(migrated.dataVersion, 3);
+  assert.equal(migrated.dataVersion, 4);
+  assert.equal(migrated.timerUsed, true);
   for (const index of legacy.history) {
     assert.ok(migrated.reasoning[index].explanation);
     assert.ok(migrated.reasoning[index].requiredClues.length);
   }
+});
+
+test("lost completion state migrates to a visible board completion action", () => {
+  const puzzle = PUZZLES[0];
+  const established = Object.fromEntries(puzzle.solution.map((value, index) => [index, value]));
+  const recovered = migrateProgress(puzzle, { established, history: puzzle.path, revealed: puzzle.path, elapsed: 0 });
+  assert.equal(recovered.complete, false);
+  assert.equal(boardCompletionAvailable(recovered), true);
+  const completed = migrateProgress(puzzle, { established, history: puzzle.path, revealed: puzzle.path, complete: true });
+  assert.equal(completed.complete, true);
+  assert.equal(boardCompletionAvailable(completed), false);
 });
 
 for (const puzzle of PUZZLES) {

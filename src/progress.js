@@ -1,13 +1,15 @@
 import { deductionFor, positionLabel } from "./logic.js";
 
 export function freshProgressState() {
-  return { established: {}, revealed: [], history: [], reasoning: {}, hints: 0, dimmed: [], timerOn: false, elapsed: 0, startedAt: null, complete: false, opened: false, dataVersion: 3 };
+  return { established: {}, revealed: [], history: [], reasoning: {}, hints: 0, dimmed: [], timerOn: false, timerUsed: false, elapsed: 0, startedAt: null, complete: false, opened: false, dataVersion: 4 };
 }
 
 export function migrateProgress(puzzle, saved = {}) {
   const next = { ...freshProgressState(), ...saved };
   const entries = Object.entries(next.established || {});
   if (entries.some(([index, value]) => puzzle.solution[Number(index)] !== value)) return freshProgressState();
+  next.complete = Boolean(saved.complete && entries.length === 16);
+  next.timerUsed = saved.timerUsed ?? Boolean(saved.timerOn || saved.startedAt || Number(saved.elapsed) > 0);
   next.revealed = [...new Set((next.revealed || []).filter((index) => Number.isInteger(index) && index >= 0 && index < 16))];
   next.history = (next.history || []).filter((index) => next.established[index] !== undefined);
   const migratedReasoning = {};
@@ -34,6 +36,6 @@ export function migrateProgress(puzzle, saved = {}) {
   }
   next.reasoning = migratedReasoning;
   next.opened = saved.opened ?? (entries.length > 0 || Boolean(saved.complete));
-  next.dataVersion = 3;
+  next.dataVersion = 4;
   return next;
 }

@@ -112,7 +112,7 @@ export function deductionDetails(puzzle, established, index, value, reasons) {
     supportIndices,
     highlightedIndices: [...new Set([index, ...supportIndices])],
     establishedText,
-    isCombined: usableReasons.length > 1 || supportIndices.length > 0
+    isCombined: usableReasons.length > 1 || usableReasons.some((clue) => ["rowCount", "colCount", "neighborCount"].includes(clue.type))
   };
 }
 
