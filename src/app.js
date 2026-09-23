@@ -64,7 +64,7 @@ function render() {
   $("#undoButton").disabled = !state.history.length;
   $("#caseReady").hidden = !boardCompletionAvailable(state);
   $("#ruleCard").innerHTML = puzzle.ruleCard ? `<article class="rule-card">
-    <small>RULE CARD</small><strong>${puzzle.ruleCard.title}</strong>
+    <strong>${puzzle.ruleCard.title}</strong>
     <p>${puzzle.ruleCard.plain}</p><p><b>Simplified for this case:</b> ${puzzle.ruleCard.simplified}</p>
     <div class="rule-links">${puzzle.ruleCard.rules.map((rule) => `<a href="${rule.url}" target="_blank" rel="noreferrer">${rule.label}<span class="sr-only"> opens official Pennsylvania Code in a new tab</span></a>`).join("")}</div>
   </article>` : "";
@@ -72,7 +72,7 @@ function render() {
   $("#clueList").innerHTML = [...puzzle.initialClues, ...puzzle.cardClues.filter((clue) => state.revealed.includes(clue.owner))]
     .map((clue, i) => `<article class="clue-paper ${state.dimmed.includes(clue.id) ? "is-dimmed" : ""}">
       <button class="clue-toggle" data-clue="${clue.id}" aria-pressed="${state.dimmed.includes(clue.id)}" aria-label="${state.dimmed.includes(clue.id) ? "Restore" : "Dim"} clue ${i + 1}">
-        <span class="clue-number">${String(i + 1).padStart(2, "0")}</span><span><small>${clue.label}</small>${clue.text}</span>
+        <span class="clue-number">${String(i + 1).padStart(2, "0")}</span><span>${clue.text}</span>
       </button>
     </article>`).join("");
 
